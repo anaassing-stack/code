@@ -1,24 +1,34 @@
-from flask import Flask, Response, render_template_string, request
-from collections import deque
+from flask import Flask, render_template_string
+from flask_socketio import SocketIO, emit
+import os
 
 app = Flask(__name__)
+app.config['SECRET_KEY'] = 'secret!'
 
-# Guarda los últimos frames en memoria
-frames = deque(maxlen=10)
+# Configurar SocketIO con eventlet para producción
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 HTML = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AUDITORY // LIVE CAM</title>
+    <title>AUDITORY // LIVE</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <style>
-        body { background: #000; color: #0f0; text-align: center; font-family: monospace; }
-        img { border: 2px solid #0f0; width: 640px; height: 480px; margin-top: 20px;}
+        body { background: #000; color: #0f0; text-align: center; font-family: monospace; margin: 0; padding: 0; overflow: hidden; }
+        h1 { margin: 10px; font-size: 20px; }
+        img { width: 100vw; height: 100vh; object-fit: contain; }
     </style>
 </head>
 <body>
     <h1>AUDITORY LIVE STREAM</h1>
-    <img src="/video_feed" />
+    <img id="video" src="" />
+    <script>
+        var socket = io();
+        socket.on('video_frame', function(msg) {
+            document.getElementById('video').src = 'data:image/jpeg;base64,' + msg.data;
+        });
+    </script>
 </body>
 </html>
 """
@@ -27,22 +37,12 @@ HTML = """
 def index():
     return render_template_string(HTML)
 
-@app.route('/video_feed')
-def video_feed():
-    def generate():
-        while True:
-            if frames:
-                frame = frames[-1]
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-    return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
-
-@app.route('/upload_frame', methods=['POST'])
-def upload_frame():
-    frame_data = request.data
-    if frame_data:
-        frames.append(frame_data)
-    return "OK"
+@socketio.on('video_frame')
+def handle_frame(data):
+    # Reenviar el frame a todos los clientes conectados (tu navegador)
+    emit('video_frame', data, broadcast=True)
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=10000)
+    # Render asigna un puerto dinámico en la variable de entorno PORT
+    port = int(os.environ.get("PORT", 10000))
+    socketio.run(app, host='0.0.0.0', port=port)
