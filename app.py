@@ -1,19 +1,16 @@
-from flask import Flask, render_template_string
-from flask_socketio import SocketIO, emit
-import os
+from flask import Flask, Response, render_template_string, request
+from collections import deque
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'secret!'
 
-# Configurar SocketIO con eventlet para producción
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+# Guarda los últimos frames en memoria
+frames = deque(maxlen=1)
 
 HTML = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AUDITORY // LIVE</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <title>AUDITORY // LIVE CAM</title>
     <style>
         body { background: #000; color: #0f0; text-align: center; font-family: monospace; margin: 0; padding: 0; overflow: hidden; }
         h1 { margin: 10px; font-size: 20px; }
@@ -22,13 +19,7 @@ HTML = """
 </head>
 <body>
     <h1>AUDITORY LIVE STREAM</h1>
-    <img id="video" src="" />
-    <script>
-        var socket = io();
-        socket.on('video_frame', function(msg) {
-            document.getElementById('video').src = 'data:image/jpeg;base64,' + msg.data;
-        });
-    </script>
+    <img src="/video_feed" />
 </body>
 </html>
 """
@@ -37,12 +28,24 @@ HTML = """
 def index():
     return render_template_string(HTML)
 
-@socketio.on('video_frame')
-def handle_frame(data):
-    # Reenviar el frame a todos los clientes conectados (tu navegador)
-    emit('video_frame', data, broadcast=True)
+@app.route('/video_feed')
+def video_feed():
+    def generate():
+        while True:
+            if frames:
+                frame = frames[-1]
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+    return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/upload_frame', methods=['POST'])
+def upload_frame():
+    frame_data = request.data
+    if frame_data:
+        frames.append(frame_data)
+    return "OK"
 
 if __name__ == "__main__":
-    # Render asigna un puerto dinámico en la variable de entorno PORT
+    import os
     port = int(os.environ.get("PORT", 10000))
-    socketio.run(app, host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port)
